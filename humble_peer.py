@@ -5,7 +5,7 @@ import math
 
 np.set_printoptions(precision=2)
 
-run = 10 # number of random runs
+run = 30 # number of random runs
 
 def test(w, X, Y, alg, sparse=False):
     # return 0
