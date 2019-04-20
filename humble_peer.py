@@ -12,16 +12,18 @@ def get_args():
 
     # args.data_filepath = "kaggle_music.p"
     # args.data_filepath = "landmine.p"
-    args.data_filepath = "emails.p"
+    # args.data_filepath = "emails.p"
+    args.data_filepath = "sentiment.p"
+
 
     args.sparse = False if args.data_filepath in ["landmine.p"] else True
     with open(args.data_filepath, "rb") as f:
         [args.X_train, args.Y_train, args.X_test, args.Y_test, args.k, args.fea] = pickle.load(f)
-    if args.data_filepath == "emails.p":
+    if args.data_filepath in ["emails.p", "sentiments"]:
         # emails.p is in COO format
         args.X_train = args.X_train.tocsr()
         args.X_test = args.X_test.tocsr()
-    args.run = 10
+    args.run = 5
     return args
 
 def test(w, k, X, Y, alg, sparse=False):
@@ -247,6 +249,14 @@ def peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30)
             if z == 1:
                 query_count += 1
             total_count[tid] += 1
+
+            #### my modification
+            # now only share data if true label queried
+            # for j in range(k):
+            #     if tau[tid][j] >= tau[tid][tid] and j!=tid:
+            #         if yt != np.sign(f_t[j]):
+            #             w[j] = w[j] + z * yt * x
+
             if query_count >= query_limit:
                 break
         acc.append(test(w, k, X_test, Y_test, "peer", sparse))
@@ -362,11 +372,11 @@ def new_peer(X, Y, X_test, Y_test, k, fea, mode, query_limit = 10**10, sparse=Fa
     # print(np.average(err_count_tasks), np.std(err_count_tasks))
     return acc
 
-def my_peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30):
+def my_peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30, C=0):
 
     # hyperparameters
     b = 1  # controls self confidence
-    C = np.log(30)
+    C = C  # controls how much task weight reduces based on loss
     # C = 1
 
     query_count_runs = np.zeros((k, 0))
@@ -425,7 +435,7 @@ def my_peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=
                     tau[tid][tsk] = tau[tid][tsk] * np.exp(- C * l_t[tsk])
                 tau[tid] = tau[tid] * k / sum(tau[tid])
 
-            #### my modification
+            ### my modification
             # now only share data if true label queried
             for j in range(k):
                 if tau[tid][j] >= tau[tid][tid] and j!=tid:
@@ -485,5 +495,6 @@ if __name__ == "__main__":
     # pooled(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
     # peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run)
     # new_peer(X_train, Y_train, X_test, Y_test, k, fea, mode='mistake', sparse=sparse)
-    my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run)
+    # my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=0)
+    my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=np.log(30))
 
