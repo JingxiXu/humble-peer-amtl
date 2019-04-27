@@ -11,8 +11,8 @@ def get_args():
     args = parser.parse_args()
 
     # args.data_filepath = "kaggle_music.p"
-    args.data_filepath = "landmine.p"
-    # args.data_filepath = "emails.p"
+    # args.data_filepath = "landmine.p"
+    args.data_filepath = "emails.p"
     # args.data_filepath = "sentiment.p"
 
 
@@ -212,11 +212,11 @@ def pooled(X, Y, X_test, Y_test, k, fea, sparse, run):
         query_count / run, np.sum(err_count) / (X.shape[0] * run), sum(acc)/len(acc)))
     return acc
 
-def peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30, share=True):
-    query_count_tasks = []
-    total_count = np.zeros((k, 1))
-    err_count_tasks = []
-    peer_count = 0.0
+def peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30, share=False):
+    query_count = np.zeros((k, run)) # number of oracle queries
+    total_count = np.zeros((k, run)) # number of total training examples
+    err_count = np.zeros((k, run)) # number of error prediction
+    peer_count = np.zeros((k, run)) # num of peer queries
     b = 1.0 # controls self confidence
     bq = 5.0 # controls peer confidence
     acc = []
@@ -224,8 +224,6 @@ def peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30,
     for r in range(run):
         print(r)
         shuffle = np.random.permutation(X.shape[0])
-        query_count = 0.0
-        err_count = np.zeros((k, 1))
         tau = np.ones((k, k))/(k-1) - np.eye(k) * ((k-2) / (k-1))
         w = np.zeros((k, fea))
         for i in range(X.shape[0]):
@@ -253,19 +251,19 @@ def peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30,
                 peer_uncertainty = bq / (bq + abs(fpeer))
                 q = np.random.binomial(1, peer_uncertainty)
                 if q == 0:
-                    peer_count += 1
+                    peer_count[tid][r] += 1
                     y_hat = np.sign(fpeer)
                     if y_hat == 0:
                         y_hat = 1
             z = p * q
-            if query_count >= query_limit:
+            if np.sum(query_count, axis=0)[r] >= query_limit:
                 z = 0
             
             yt = Y[shuffle[i]]
             if yt == 0:
                 yt = -1
             if yt != y_hat:
-                err_count[tid] += 1
+                err_count[tid][r] += 1
                 w[tid] = w[tid] + yt * z * x
                 # update tau
                 sel_tasks = [i for i in range(k) if i != tid]
@@ -278,8 +276,8 @@ def peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30,
             if p == 1 and q == 0:
                 w[tid] += y_hat * x
             if z == 1:
-                query_count += 1
-            total_count[tid] += 1
+                query_count[tid][r] += 1
+            total_count[tid][r] += 1
 
             #### my modification
             # now only share data if true label queried
@@ -289,119 +287,12 @@ def peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30,
                         if yt != np.sign(f_t[j]):
                             w[j] = w[j] + z * yt * x
 
-            if query_count >= query_limit:
+            if np.sum(query_count, axis=0)[r] >= query_limit:
                 break
         acc.append(test(w, k, X_test, Y_test, "peer", sparse))
-        query_count_tasks.append(query_count)
-        err_count_tasks.append(np.sum(err_count) / X.shape[0])
-    print("{:16s} query {:09.4f}\t mistakes {:.4f}\t accuracy {:.4f}".format("peer",
-        np.average(query_count_tasks), np.sum(err_count_tasks) / run, sum(acc)/len(acc)))
-    # print(np.average(acc), np.std(acc))
-    # print(np.average(query_count_tasks), np.std(query_count_tasks))
-    # print(np.average(err_count_tasks), np.std(err_count_tasks))
-    return acc
 
-def new_peer(X, Y, X_test, Y_test, k, fea, mode, query_limit = 10**10, sparse=False, run=30):
-    """
-    mode is 'distance' or 'mistake'
-    """
-    def clip(x,y):
-        return min(2, max(0, 1 - x * y))
-
-    query_count_tasks = []
-    total_count = np.zeros((k, 1))
-    err_count_tasks = []
-    peer_count = 0.0
-    b = 1  # controls self confidence
-    alpha = 1.1
-    C = np.log(30)
-    # C = 0
-    beta = 0.1
-    acc = []
-
-    for r in range(run):
-        shuffle = np.random.permutation(X.shape[0])
-        query_count = 0.0
-        err_count = np.zeros((k, 1))
-        tau = np.ones((k, k))
-        w = np.zeros((k, fea))
-        total_sum = np.zeros((k, fea))
-        total_num = np.zeros((k,1))
-        center = np.zeros((k, fea))
-
-        for i in range(X.shape[0]):
-            if sparse:
-                x = X.getrow(shuffle[i]).toarray()
-                tid = int(x[0][0])
-                x = x[0][1:]
-            else:
-                x = X[shuffle[i]][1:]
-                tid = int(X[shuffle[i]][0])
-            x = np.concatenate((x, np.asarray([1])))
-            x = x / np.linalg.norm(x)
-
-            f_t = w.dot(x)
-            if mode == 'distance':
-                f_total = f_t.dot(tau[tid]) * k/sum(tau[tid])
-            else:
-                f_total = f_t.dot(tau[tid])
-            y_hat = np.sign(f_total)
-            if y_hat == 0:
-                y_hat = -1
-            uncertainty = b / (b + abs(f_total))
-            z = np.random.binomial(1, uncertainty)
-            if query_count >= query_limit:
-                z = 0
-
-            yt = Y[shuffle[i]]
-            if yt == 0:
-                yt = -1
-            if yt != y_hat:
-                err_count[tid] += 1
-                w[tid] = w[tid] + yt * z * x
-            if z == 1:
-                query_count += 1
-
-            if mode == 'distance':
-                total_num[tid] = total_num[tid] + 1
-                total_sum[tid] = total_sum[tid] + x
-                new_center = total_sum[tid] / total_num[tid]
-                center[tid] = new_center
-
-                temp = center - new_center
-                dist = np.linalg.norm(temp, axis = 1)
-                weight = np.exp(C * dist)
-                tau[tid] = weight
-                tau[:,tid] = weight
-
-            if mode == 'mistake':
-                f_t_sign = np.sign(f_t)
-                for i in range(k):
-                    if f_t_sign[i] == 0:
-                        f_t_sign[i] = -1
-
-                if z == 1:
-                    l_t = np.fmin([2] * k, np.fmax([0]*k, 1-f_t * yt))
-                    l_t = l_t / sum(l_t)
-                    for tsk in range(k):
-                        tau[tid][tsk] = tau[tid][tsk] * np.exp(- C * l_t[tsk])
-                    tau[tid] = tau[tid]*k/sum(tau[tid])
-
-            total_count[tid] += 1
-            if query_count >= query_limit:
-                break
-        w = tau.dot(w)
-        acc.append(test(w, k, X_test, Y_test, "peer", sparse))
-        query_count_tasks.append(query_count)
-        err_count_tasks.append(np.sum(err_count) / X.shape[0])
-    avg_acc = sum(acc) / len(acc)
-    print("{:16s} query {:09.4f}\t mistakes {:.4f}\t accuracy {:.4f}".format("peer",
-                                                                             np.average(query_count_tasks),
-                                                                             np.sum(err_count_tasks) / run,
-                                                                             avg_acc))
-    # print(np.average(acc), np.std(acc))
-    # print(np.average(query_count_tasks), np.std(query_count_tasks))
-    # print(np.average(err_count_tasks), np.std(err_count_tasks))
+    model = "PEER+share" if share else "PEER"
+    print_summary(model, acc, query_count, err_count, X.shape[0], run)
     return acc
 
 def my_peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30, C=0, share=True):
@@ -526,11 +417,10 @@ if __name__ == "__main__":
     # random(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
     # indep(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
     # pooled(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
-    peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run)
-    # peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, share=False)
-    # new_peer(X_train, Y_train, X_test, Y_test, k, fea, mode='mistake', sparse=sparse)
-    # my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=0, share=False)
+    # peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run)
+    # peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, share=True)
+    # my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=0)
     # my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=np.log(30))
-    # my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=np.log(30), share=False)
+    my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=np.log(30), share=True)
 
 
