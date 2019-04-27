@@ -12,8 +12,8 @@ def get_args():
 
     # args.data_filepath = "kaggle_music.p"
     # args.data_filepath = "landmine.p"
-    args.data_filepath = "emails.p"
-    # args.data_filepath = "sentiment.p"
+    # args.data_filepath = "emails.p"
+    args.data_filepath = "sentiment.p"
 
 
     args.sparse = False if args.data_filepath in ["landmine.p"] else True
@@ -61,6 +61,7 @@ def get_std_error(a):
     a = np.array(a)
     n = len(a)
     # return np.std(a, ddof=1)/np.sqrt(n)
+    # Note now actually just get std deviation
     return np.std(a, ddof=1)
 
 def print_summary(model, acc_list, query_count, err_count, num_train_examples, run):
@@ -90,6 +91,7 @@ def random(X, Y, X_test, Y_test, k, fea, sparse, run):
     acc = []
 
     for r in range(run):
+        print("run: {}".format(r))
         shuffle = np.random.permutation(X.shape[0])
         w = np.zeros((k, fea))
         for i in range(X.shape[0]):
@@ -131,6 +133,7 @@ def indep(X, Y, X_test, Y_test, k, fea, sparse, run):
     acc = []
     
     for r in range(run):
+        print("run: {}".format(r))
         shuffle = np.random.permutation(X.shape[0])
         w = np.zeros((k, fea))
         for i in range(X.shape[0]):
@@ -222,7 +225,7 @@ def peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30,
     acc = []
 
     for r in range(run):
-        print(r)
+        print("run: {}".format(r))
         shuffle = np.random.permutation(X.shape[0])
         tau = np.ones((k, k))/(k-1) - np.eye(k) * ((k-2) / (k-1))
         w = np.zeros((k, fea))
@@ -307,6 +310,7 @@ def committee(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, ru
     acc = []
 
     for r in range(run):
+        print("run: {}".format(r))
         shuffle = np.random.permutation(X.shape[0])
         tau = np.ones((k, k))
         w = np.zeros((k, fea))
@@ -349,7 +353,7 @@ def committee(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, ru
                     f_t_sign[i] = -1
 
             if z == 1:
-                l_t = np.fmin([2] * k, np.fmax([0] * k, 1 - f_t * yt)) # TODO what is this?
+                l_t = np.fmin([2] * k, np.fmax([0] * k, 1 - f_t * yt)) # NOTE uppper bound the loss
                 if sum(l_t) != 0:
                     l_t = l_t / sum(l_t)
                 for tsk in range(k):
@@ -372,9 +376,6 @@ def committee(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, ru
         acc.append(test(w, k, X_test, Y_test, "peer", sparse))
 
     print_summary("committee", acc, query_count, err_count, X.shape[0], run)
-    # print(np.average(acc), np.std(acc))
-    # print(np.average(query_count_runs), np.std(query_count_runs))
-    # print(np.average(err_count_runs), np.std(err_count_runs))
     return acc
 
 def print_dataset_info(args):
@@ -399,13 +400,14 @@ if __name__ == "__main__":
 
     print_dataset_info(args)
 
-    # random(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
-    # indep(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
+    random(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
+    indep(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
     # pooled(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
-    # peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run)
-    # peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, share=True)
-    # my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=0)
-    # my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=np.log(30))
+    peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run)
+    peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, share=True)
     committee(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=np.log(30), share=True)
+
+
+
 
 
