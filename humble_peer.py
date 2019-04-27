@@ -295,21 +295,19 @@ def peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30,
     print_summary(model, acc, query_count, err_count, X.shape[0], run)
     return acc
 
-def my_peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30, C=0, share=True):
+def committee(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30, C=0, share=False):
 
     # hyperparameters
     b = 1  # controls self confidence
     C = C  # controls how much task weight reduces based on loss
-    # C = 1
 
-    query_count_runs = np.zeros((k, 0))
-    err_count_runs = np.zeros((k, 0))
-    acc_runs = []
+    query_count = np.zeros((k, run)) # number of oracle queries
+    total_count = np.zeros((k, run)) # number of total training examples
+    err_count = np.zeros((k, run)) # number of error prediction
+    acc = []
 
     for r in range(run):
         shuffle = np.random.permutation(X.shape[0])
-        query_count = np.zeros((k, 1)) # query count for each task
-        err_count = np.zeros((k, 1)) # err count for each task
         tau = np.ones((k, k))
         w = np.zeros((k, fea))
 
@@ -333,17 +331,17 @@ def my_peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=
                 y_hat = -1
             uncertainty = b / (b + abs(f_total))
             z = np.random.binomial(1, uncertainty)
-            if np.sum(query_count) >= query_limit:
+            if np.sum(query_count, axis=0)[r] >= query_limit:
                 z = 0
 
             yt = Y[shuffle[i]]
             if yt == 0:
                 yt = -1
             if yt != y_hat:
-                err_count[tid] += 1
+                err_count[tid][r] += 1
                 w[tid] = w[tid] + yt * z * x
             if z == 1:
-                query_count[tid] += 1
+                query_count[tid][r] += 1
 
             f_t_sign = np.sign(f_t)
             for i in range(k):
@@ -357,6 +355,7 @@ def my_peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=
                 for tsk in range(k):
                     tau[tid][tsk] = tau[tid][tsk] * np.exp(- C * l_t[tsk])
                 tau[tid] = tau[tid] * k / sum(tau[tid])
+            total_count[tid][r] += 1
 
             ### my modification
             # now only share data if true label queried
@@ -366,31 +365,17 @@ def my_peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=
                         if yt != f_t_sign[j]:
                             w[j] = w[j] + z * yt * x
 
-            if np.sum(query_count) >= query_limit:
+            if np.sum(query_count, axis=0)[r] >= query_limit:
                 break
 
-        # one run is finished
         w = tau.dot(w)
-        acc = test(w, k, X_test, Y_test, "peer", sparse)
-        query = np.sum(query_count)
-        mistake_rate = np.sum(err_count)/X_train.shape[0]
-        print("iteration: {} acc: {:.4f} query: {:.4f} mistake_rate: {:.4f}".format(r, acc, query, mistake_rate))
-        acc_runs.append(acc)
-        query_count_runs = np.hstack((query_count_runs, query_count))
-        err_count_runs = np.hstack((err_count_runs, err_count))
+        acc.append(test(w, k, X_test, Y_test, "peer", sparse))
 
-    # all runs are finished
-    avg_acc = sum(acc_runs) / len(acc_runs)
-    avg_query_count = np.average(np.sum(query_count_runs, axis=0))
-    avg_mistake_rate = np.average(np.sum(err_count_runs, axis=0))/X_train.shape[0]
-    print("{:16s} query {:09.4f}\t mistakes {:.4f}\t accuracy {:.4f}".format("peer",
-                                                                             avg_query_count,
-                                                                             avg_mistake_rate,
-                                                                             avg_acc))
+    print_summary("committee", acc, query_count, err_count, X.shape[0], run)
     # print(np.average(acc), np.std(acc))
     # print(np.average(query_count_runs), np.std(query_count_runs))
     # print(np.average(err_count_runs), np.std(err_count_runs))
-    return acc_runs
+    return acc
 
 def print_dataset_info(args):
     print("data set: {}".format(args.data_filepath))
@@ -421,6 +406,6 @@ if __name__ == "__main__":
     # peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, share=True)
     # my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=0)
     # my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=np.log(30))
-    my_peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=np.log(30), share=True)
+    committee(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=np.log(30), share=True)
 
 
