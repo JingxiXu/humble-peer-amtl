@@ -64,7 +64,7 @@ def get_std_error(a):
     # Note now actually just get std deviation
     return np.std(a, ddof=1)
 
-def print_summary(model, acc_list, query_count, err_count, num_train_examples, run):
+def print_summary(model, acc_list, query_count, err_count, total_count, run):
     """
     :param model: name of this model
     :param acc_list: list of run elements
@@ -74,17 +74,19 @@ def print_summary(model, acc_list, query_count, err_count, num_train_examples, r
     """
     accuracy = np.average(acc_list)
     query = np.sum(query_count) / run
-    mistake = np.sum(err_count) / (run * num_train_examples)
+    mistake_rates = np.sum(err_count, axis=0)/np.sum(total_count, axis=0)
+    mistake_rate = np.average(mistake_rates)
     acc_std_err = get_std_error(acc_list)
     query_std_err = get_std_error(np.sum(query_count, axis=0))
-    mistake_std_err = get_std_error(np.sum(err_count, axis=0)/num_train_examples)
+    mistake_std_err = get_std_error(mistake_rates)
 
     print()
     print(model)
     print("accuracy: {:.4f}, acc_std_err: {:.4f}, query: {:.1f}, query_std_err: {:.1f}, mistakes: {:.4f}, mistakes_std_err: {:.4f}"\
-          .format(accuracy, acc_std_err, query, query_std_err, mistake, mistake_std_err))
+          .format(accuracy, acc_std_err, query, query_std_err, mistake_rate, mistake_std_err))
 
-def random(X, Y, X_test, Y_test, k, fea, sparse, run):
+def random(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run=10):
+    query_limit = float(query_limit)
     query_count = np.zeros((k, run))
     total_count = np.zeros((k, run))
     err_count = np.zeros((k, run))
@@ -110,7 +112,7 @@ def random(X, Y, X_test, Y_test, k, fea, sparse, run):
             if y_hat == 0:
                 y_hat = 1
             p = np.random.binomial(1, 0.5)
-            z = p
+            z = p if np.sum(query_count, axis=0)[r] < query_limit else 0
             yt = Y[shuffle[i]]
             if yt == 0:
                 yt = -1
@@ -120,12 +122,16 @@ def random(X, Y, X_test, Y_test, k, fea, sparse, run):
             if z == 1:
                 query_count[tid][r] += 1
             total_count[tid][r] += 1
+
+            if np.sum(query_count, axis=0)[r] >= query_limit:
+                break
         acc.append(test(w, k, X_test, Y_test, "random", sparse))
 
-    print_summary("random", acc, query_count, err_count, X.shape[0], run)
+    print_summary("random", acc, query_count, err_count, total_count, run)
     return acc
     
-def indep(X, Y, X_test, Y_test, k, fea, sparse, run):
+def indep(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run=10):
+    query_limit = float(query_limit)
     query_count = np.zeros((k, run))
     total_count = np.zeros((k, run))
     err_count = np.zeros((k, run))
@@ -154,7 +160,7 @@ def indep(X, Y, X_test, Y_test, k, fea, sparse, run):
 
             uncertainty = b / (b + abs(f_t))
             p = np.random.binomial(1, uncertainty)
-            z = p
+            z = p if np.sum(query_count, axis=0)[r] < query_limit else 0
             yt = Y[shuffle[i]]
             if yt == 0:
                 yt = -1
@@ -164,58 +170,17 @@ def indep(X, Y, X_test, Y_test, k, fea, sparse, run):
             if z == 1:
                 query_count[tid][r] += 1
             total_count[tid][r] += 1
+
+            if np.sum(query_count, axis=0)[r] >= query_limit:
+                break
         acc.append(test(w, k, X_test, Y_test, "independent", sparse))
 
-    print_summary("indep", acc, query_count, err_count, X.shape[0], run)
+    print_summary("indep", acc, query_count, err_count, total_count, run)
     return acc
 
-def pooled(X, Y, X_test, Y_test, k, fea, sparse, run):
-    query_count = 0.0
-    total_count = np.zeros((k, 1))
-    err_count = np.zeros((k, 1))
-    b = 1.0 # controls confidence
-    acc = []
-    
-    for r in range(run):
-        shuffle = np.random.permutation(X.shape[0])
-        w = np.zeros((1, fea))
-        for i in range(X.shape[0]):
-            if sparse:
-                x = X.getrow(shuffle[i]).toarray()
-                tid = int(x[0][0])
-                x = x[0][1:]
-            else:
-                x = X[shuffle[i]][1:]
-                tid = int(X[shuffle[i]][0])
-            x = np.concatenate((x, np.asarray([1])))
-            x = x / np.linalg.norm(x)
-            
-            f_t = w[0].dot(x)
-            y_hat = np.sign(f_t)
-            if y_hat == 0:
-                y_hat = 1
-            
-            if math.isnan(f_t):
-                continue
 
-            uncertainty = b / (b + abs(f_t))
-            p = np.random.binomial(1, uncertainty)
-            z = p
-            yt = Y[shuffle[i]]
-            if yt == 0:
-                yt = -1
-            if yt != y_hat:
-                err_count[tid] += 1
-                w[0] = w[0] + yt * z * x
-            if z == 1:
-                query_count += 1
-            total_count[tid] += 1
-        acc.append(test(w, k, X_test, Y_test, "pooled", sparse))
-    print("{:16s} query {:09.4f}\t mistakes {:.4f}\t accuracy {:.4f}".format("pooled",
-        query_count / run, np.sum(err_count) / (X.shape[0] * run), sum(acc)/len(acc)))
-    return acc
-
-def peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30, share=False):
+def peer(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run=30, share=False):
+    query_limit = float(query_limit)
     query_count = np.zeros((k, run)) # number of oracle queries
     total_count = np.zeros((k, run)) # number of total training examples
     err_count = np.zeros((k, run)) # number of error prediction
@@ -295,15 +260,16 @@ def peer(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30,
         acc.append(test(w, k, X_test, Y_test, "peer", sparse))
 
     model = "PEER+share" if share else "PEER"
-    print_summary(model, acc, query_count, err_count, X.shape[0], run)
+    print_summary(model, acc, query_count, err_count, total_count, run)
     return acc
 
-def committee(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, run=30, C=0, share=False):
+def committee(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run=30, C=0, share=False):
 
     # hyperparameters
     b = 1  # controls self confidence
     C = C  # controls how much task weight reduces based on loss
 
+    query_limit = float(query_limit)
     query_count = np.zeros((k, run)) # number of oracle queries
     total_count = np.zeros((k, run)) # number of total training examples
     err_count = np.zeros((k, run)) # number of error prediction
@@ -375,7 +341,7 @@ def committee(X, Y, X_test, Y_test, k, fea, query_limit=10**10, sparse=False, ru
         w = tau.dot(w)
         acc.append(test(w, k, X_test, Y_test, "peer", sparse))
 
-    print_summary("committee", acc, query_count, err_count, X.shape[0], run)
+    print_summary("committee", acc, query_count, err_count, total_count, run)
     return acc
 
 def print_dataset_info(args):
@@ -393,6 +359,16 @@ def print_dataset_info(args):
     num_data = args.X_train.shape[0] + args.X_test.shape[0]
     print("num of positive points: {} ({})".format(num_positive_point, num_positive_point/num_data))
 
+# def test_with_limited_query(data_filepath, model, X_train, Y_train, X_test, Y_test, k, fea, sparse, run, share):
+#     if data_filepath == "landmine.p":
+#         query_ratio = np.linspace(0.01, 0.1, 10)
+#     else:
+#         query_ratio = np.linspace(0.03, 0.3, 10)
+#     if model.__name__ in ['random', 'independent']
+#     for q in query_ratio:
+#         model()
+
+
 if __name__ == "__main__":
     args = get_args()
     X_train, Y_train, X_test, Y_test, k, fea = args.X_train, args.Y_train, args.X_test, args.Y_test, args.k, args.fea
@@ -400,12 +376,24 @@ if __name__ == "__main__":
 
     print_dataset_info(args)
 
-    random(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
-    indep(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
-    # pooled(X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
-    peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run)
-    peer(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, share=True)
-    committee(X_train, Y_train, X_test, Y_test, k, fea, sparse=sparse, run=run, C=np.log(30), share=True)
+    # random(X_train, Y_train, X_test, Y_test, k, fea, query_limit='inf', sparse=sparse, run=run)
+    # indep(X_train, Y_train, X_test, Y_test, k, fea, query_limit='inf', sparse=sparse, run=run)
+    # peer(X_train, Y_train, X_test, Y_test, k, fea, query_limit='inf', sparse=sparse, run=run)
+    # peer(X_train, Y_train, X_test, Y_test, k, fea, query_limit='inf', sparse=sparse, run=run, share=True)
+    # committee(X_train, Y_train, X_test, Y_test, k, fea, query_limit='inf', sparse=sparse, run=run, C=np.log(30), share=True)
+
+    query_ratio = np.linspace(0.03, 0.3, 10)
+    query_limit = query_ratio * X_train.shape[0]
+    for q in query_limit:
+        print(q)
+        random(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run)
+        indep(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run)
+        peer(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run)
+        peer(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run, share=True)
+        committee(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run, C=np.log(30), share=True)
+
+
+
 
 
 
