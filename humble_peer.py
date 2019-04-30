@@ -3,6 +3,10 @@ import numpy as np
 import pickle
 import math
 import argparse
+import time
+import pickle
+import matplotlib.pyplot as plt
+
 
 np.set_printoptions(precision=4, suppress=True)
 
@@ -12,14 +16,14 @@ def get_args():
 
     # args.data_filepath = "kaggle_music.p"
     # args.data_filepath = "landmine.p"
-    # args.data_filepath = "emails.p"
-    args.data_filepath = "sentiment.p"
+    args.data_filepath = "emails.p"
+    # args.data_filepath = "sentiment.p"
 
 
     args.sparse = False if args.data_filepath in ["landmine.p"] else True
     with open(args.data_filepath, "rb") as f:
         [args.X_train, args.Y_train, args.X_test, args.Y_test, args.k, args.fea] = pickle.load(f)
-    if args.data_filepath in ["emails.p", "sentiments"]:
+    if args.data_filepath in ["emails.p", "sentiment.p"]:
         # emails.p is in COO format
         args.X_train = args.X_train.tocsr()
         args.X_test = args.X_test.tocsr()
@@ -84,6 +88,7 @@ def print_summary(model, acc_list, query_count, err_count, total_count, run):
     print(model)
     print("accuracy: {:.4f}, acc_std_err: {:.4f}, query: {:.1f}, query_std_err: {:.1f}, mistakes: {:.4f}, mistakes_std_err: {:.4f}"\
           .format(accuracy, acc_std_err, query, query_std_err, mistake_rate, mistake_std_err))
+    return accuracy, query, mistake_rate
 
 def random(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run=10):
     query_limit = float(query_limit)
@@ -127,8 +132,8 @@ def random(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run=10
                 break
         acc.append(test(w, k, X_test, Y_test, "random", sparse))
 
-    print_summary("random", acc, query_count, err_count, total_count, run)
-    return acc
+    accuracy, query, mistake_rate = print_summary("random", acc, query_count, err_count, total_count, run)
+    return accuracy, query, mistake_rate
     
 def indep(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run=10):
     query_limit = float(query_limit)
@@ -175,8 +180,8 @@ def indep(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run=10)
                 break
         acc.append(test(w, k, X_test, Y_test, "independent", sparse))
 
-    print_summary("indep", acc, query_count, err_count, total_count, run)
-    return acc
+    accuracy, query, mistake_rate = print_summary("indep", acc, query_count, err_count, total_count, run)
+    return accuracy, query, mistake_rate
 
 
 def peer(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run=30, share=False):
@@ -260,8 +265,8 @@ def peer(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run=30, 
         acc.append(test(w, k, X_test, Y_test, "peer", sparse))
 
     model = "PEER+share" if share else "PEER"
-    print_summary(model, acc, query_count, err_count, total_count, run)
-    return acc
+    accuracy, query, mistake_rate = print_summary(model, acc, query_count, err_count, total_count, run)
+    return accuracy, query, mistake_rate
 
 def committee(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run=30, C=0, share=False):
 
@@ -279,9 +284,15 @@ def committee(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run
         print("run: {}".format(r))
         shuffle = np.random.permutation(X.shape[0])
         tau = np.ones((k, k))
-        w = np.zeros((k, fea))
+        w = np.zeros((k, fea))  # TODO maybe consider using fea - 1
 
+        # start = time.time()
         for i in range(X.shape[0]):
+            # print(i)
+            # if i == 50:
+            #     print(time.time()-start)
+            #     exit()
+
             if sparse:
                 x = X.getrow(shuffle[i]).toarray()
                 tid = int(x[0][0])
@@ -341,8 +352,8 @@ def committee(X, Y, X_test, Y_test, k, fea, query_limit='inf', sparse=False, run
         w = tau.dot(w)
         acc.append(test(w, k, X_test, Y_test, "peer", sparse))
 
-    print_summary("committee", acc, query_count, err_count, total_count, run)
-    return acc
+    accuracy, query, mistake_rate = print_summary("committee", acc, query_count, err_count, total_count, run)
+    return accuracy, query, mistake_rate
 
 def print_dataset_info(args):
     print("data set: {}".format(args.data_filepath))
@@ -359,15 +370,48 @@ def print_dataset_info(args):
     num_data = args.X_train.shape[0] + args.X_test.shape[0]
     print("num of positive points: {} ({})".format(num_positive_point, num_positive_point/num_data))
 
-# def test_with_limited_query(data_filepath, model, X_train, Y_train, X_test, Y_test, k, fea, sparse, run, share):
-#     if data_filepath == "landmine.p":
-#         query_ratio = np.linspace(0.01, 0.1, 10)
-#     else:
-#         query_ratio = np.linspace(0.03, 0.3, 10)
-#     if model.__name__ in ['random', 'independent']
-#     for q in query_ratio:
-#         model()
+def test_with_limited_query(data_filepath, X_train, Y_train, X_test, Y_test, k, fea, sparse, run):
+    if data_filepath == "landmine.p":
+        query_ratio = np.linspace(0.01, 0.1, 10)
+    else:
+        query_ratio = np.linspace(0.03, 0.3, 10)
+    query_limit = query_ratio * X_train.shape[0]
+    acc = np.zeros((5, 10)) # models by query limits
+    query = np.zeros((5, 10))
+    mistake = np.zeros((5, 10))
+    for i, q in enumerate(query_limit):
+        acc[0, i], query[0, i], mistake[0, i] = random(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run)
+        acc[1, i], query[1, i], mistake[1, i] = indep(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run)
+        acc[2, i], query[2, i], mistake[2, i] = peer(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run)
+        acc[3, i], query[3, i], mistake[3, i] = peer(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run, share=True)
+        acc[4, i], query[4, i], mistake[4, i] = committee(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run, C=np.log(30), share=True)
+    pickle.dump([query_ratio, query_limit, acc, query, mistake], open(data_filepath.split('.')[0]+'_limit.p', 'wb'))
 
+def plot(data_filepath):
+    query_ratio, query_limit, acc, query, mistake = pickle.load(open(data_filepath, 'rb'))
+
+    plt.xlabel('query budgets')
+    plt.ylabel('accuracy on test data')
+
+    mask = query[4] < query_limit # not all query are used
+    plt.gca().set_axisbelow(True) # set grid lines below plots
+    plt.plot(query_limit, acc[0], marker='^', fillstyle='none', color='orange', label='Random')
+    plt.plot(query_limit, acc[1], marker='p', fillstyle='none', color='magenta', label='Independent')
+    plt.plot(query_limit, acc[2], marker='x', fillstyle='none', color='green', label='PEER')
+    plt.plot(query_limit, acc[3], marker='o', fillstyle='none', color='blue', label='PEERshare')
+    plt.plot(query_limit, acc[4], marker='s', fillstyle='none', color='red', label='COMMITTEE')
+    plt.scatter(query_limit[mask], acc[4][mask], marker='s', facecolors='r', edgecolors='r', label='COMMITTEE\n/w budgets left')
+
+    # change ticks
+    locs = query_limit
+    labels = [str(int(ql))+'\n'+'('+str(int(qr*100))+'%)' for ql, qr in zip(query_limit, query_ratio)]
+    plt.xticks(locs, labels)
+
+    # lgnd = plt.legend(loc='best') # best location of legends
+    # lgnd.get_frame().set_edgecolor('black') # black frame line
+    plt.gcf().tight_layout() # tight window
+    plt.grid(linestyle='--') # dashed grid line
+    plt.show()
 
 if __name__ == "__main__":
     args = get_args()
@@ -382,17 +426,8 @@ if __name__ == "__main__":
     # peer(X_train, Y_train, X_test, Y_test, k, fea, query_limit='inf', sparse=sparse, run=run, share=True)
     # committee(X_train, Y_train, X_test, Y_test, k, fea, query_limit='inf', sparse=sparse, run=run, C=np.log(30), share=True)
 
-    query_ratio = np.linspace(0.03, 0.3, 10)
-    query_limit = query_ratio * X_train.shape[0]
-    for q in query_limit:
-        print(q)
-        random(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run)
-        indep(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run)
-        peer(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run)
-        peer(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run, share=True)
-        committee(X_train, Y_train, X_test, Y_test, k, fea, query_limit=q, sparse=sparse, run=run, C=np.log(30), share=True)
-
-
+    # test_with_limited_query(args.data_filepath, X_train, Y_train, X_test, Y_test, k, fea, sparse, run)
+    plot("emails_limit.p")
 
 
 
